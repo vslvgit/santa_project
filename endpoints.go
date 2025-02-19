@@ -1,19 +1,19 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
-	// "golang.org/x/crypto/bcrypt"
+	"golang.org/x/crypto/bcrypt"
 )
 
 // Простая база данных (in-memory)
-var users = make(map[string]User)
-var mu sync.Mutex
+// var users = make(map[string]User)
+// var mu sync.Mutex
 
 // Секретный ключ для подписи JWT
 var jwtSecret = []byte("super_secret_key")
@@ -29,16 +29,16 @@ func generateJWT(name string) (string, error) {
 }
 
 // Функция для хеширования пароля
-// func hashPassword(password string) (string, error) {
-// 	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-// 	return string(bytes), err
-// }
+func hashPassword(password string) (string, error) {
+	bytes, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	return string(bytes), err
+}
 
 // Функция для проверки пароля
-// func checkPassword(hashedPassword, password string) bool {
-// 	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
-// 	return err == nil
-// }
+func checkPassword(hashedPassword, password string) bool {
+	err := bcrypt.CompareHashAndPassword([]byte(hashedPassword), []byte(password))
+	return err == nil
+}
 
 func registerUser(w http.ResponseWriter, r *http.Request) {
 	var user User
@@ -58,41 +58,42 @@ func registerUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mu.Lock()
-	defer mu.Unlock()
-	if _, exists := users[user.Name]; exists {
+	// mu.Lock()
+	// defer mu.Unlock()
+	// if _, exists := users[user.Name]; exists {
+	// 	http.Error(w, "User already exists", http.StatusConflict)
+	// 	return
+	// }
+
+	// users[user.Name] = user
+
+	// Хешируем пароль
+	hashedPassword, err := hashPassword(user.Password)
+	if err != nil {
+		http.Error(w, "Error hashing password", http.StatusInternalServerError)
+		return
+	}
+
+	// Сохраняем пользователя в базу
+
+	_, err = db.Exec(context.Background(), "INSERT INTO users (username, email, password) VALUES ($1, $2, $3)", user.Username, user.Name, hashedPassword)
+	if err != nil {
 		http.Error(w, "User already exists", http.StatusConflict)
 		return
 	}
 
-	users[user.Name] = user
+	// w.WriteHeader(http.StatusCreated)
+	// json.NewEncoder(w).Encode(map[string]string{
+	// 	"message": "User registered successfully",
+	// })
 
-	// Возвращаем успешный ответ
+		// Возвращаем успешный ответ
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{
 		"message":  "User registered successfully",
 		"username": user.Username,
 	})
-
-	// Хешируем пароль
-	// hashedPassword, err := hashPassword(user.Password)
-	// if err != nil {
-	// 	http.Error(w, "Error hashing password", http.StatusInternalServerError)
-	// 	return
-	// }
-
-	// Сохраняем пользователя в базу
-	// _, err = db.Exec(context.Background(), "INSERT INTO users (username, email, password) VALUES ($1, $2, $3)", user.Username, user.Email, hashedPassword)
-	// if err != nil {
-	// 	http.Error(w, "User already exists", http.StatusConflict)
-	// 	return
-	// }
-
-	// w.WriteHeader(http.StatusCreated)
-	// json.NewEncoder(w).Encode(map[string]string{
-	// 	"message": "User registered successfully",
-	// })
 
 }
 
@@ -110,29 +111,30 @@ func loginUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mu.Lock()
-	user, exists := users[creds.Name]
-	mu.Unlock()
+	// mu.Lock()
+	// user, exists := users[creds.Name]
+	// mu.Unlock()
 
-	if !exists || user.Password != creds.Password {
-		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
-		return
-	}
+	// if !exists || user.Password != creds.Password {
+	// 	http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+	// 	return
+	// }
+
 	// Ищем пользователя в базе
-	//	var storedPassword string
-	//	err := db.QueryRow(context.Background(), "SELECT password FROM users WHERE name=$1", creds.Name).Scan(&storedPassword)
-	//	if err != nil {
-	//		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
-	//		return
-	//	}
+		var storedPassword string
+		err = db.QueryRow(context.Background(), "SELECT password FROM users WHERE name=$1", creds.Name).Scan(&storedPassword)
+		if err != nil {
+			http.Error(w, "Invalid name or password", http.StatusUnauthorized)
+			return
+		}
 
 	// Проверяем пароль
-	//	if !checkPassword(storedPassword, creds.Password) {
-	//		http.Error(w, "Invalid name or password", http.StatusUnauthorized)
-	//		return
-	//	}
+		if !checkPassword(storedPassword, creds.Password) {
+			http.Error(w, "Invalid name or password", http.StatusUnauthorized)
+			return
+		}
 
-	token, err := generateJWT(user.Name)
+	token, err := generateJWT(creds.Name)
 	if err != nil {
 		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
 		return
@@ -198,14 +200,14 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Ищем пользователя в памяти
-	mu.Lock()
-	user, exists := users[name]
-	mu.Unlock()
+	// mu.Lock()
+	// user, exists := users[name]
+	// mu.Unlock()
 
-	if !exists {
-		http.Error(w, "User not found", http.StatusNotFound)
-		return
-	}
+	// if !exists {
+	// 	http.Error(w, "User not found", http.StatusNotFound)
+	// 	return
+	// }
 
 	// Формируем ответ
 	response := map[string]interface{}{
