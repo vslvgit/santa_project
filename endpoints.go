@@ -19,10 +19,10 @@ var mu sync.Mutex
 var jwtSecret = []byte("super_secret_key")
 
 // Функция для генерации JWT-токена
-func generateJWT(email string) (string, error) {
+func generateJWT(name string) (string, error) {
 	claims := jwt.MapClaims{
-		"email": email,
-		"exp":   time.Now().Add(time.Hour * 24).Unix(), // Токен на 24 часа
+		"name": name,
+		"exp":  time.Now().Add(time.Hour * 24).Unix(), // Токен на 24 часа
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString(jwtSecret)
@@ -53,19 +53,19 @@ func registerUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if user.Username == "" || user.Email == "" || user.Password == "" {
+	if user.Username == "" || user.Name == "" || user.Password == "" {
 		http.Error(w, "All fields are required", http.StatusBadRequest)
 		return
 	}
 
 	mu.Lock()
 	defer mu.Unlock()
-	if _, exists := users[user.Email]; exists {
+	if _, exists := users[user.Name]; exists {
 		http.Error(w, "User already exists", http.StatusConflict)
 		return
 	}
 
-	users[user.Email] = user
+	users[user.Name] = user
 
 	// Возвращаем успешный ответ
 	w.Header().Set("Content-Type", "application/json")
@@ -111,7 +111,7 @@ func loginUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	mu.Lock()
-	user, exists := users[creds.Email]
+	user, exists := users[creds.Name]
 	mu.Unlock()
 
 	if !exists || user.Password != creds.Password {
@@ -120,7 +120,7 @@ func loginUser(w http.ResponseWriter, r *http.Request) {
 	}
 	// Ищем пользователя в базе
 	//	var storedPassword string
-	//	err := db.QueryRow(context.Background(), "SELECT password FROM users WHERE email=$1", creds.Email).Scan(&storedPassword)
+	//	err := db.QueryRow(context.Background(), "SELECT password FROM users WHERE name=$1", creds.Name).Scan(&storedPassword)
 	//	if err != nil {
 	//		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
 	//		return
@@ -128,11 +128,11 @@ func loginUser(w http.ResponseWriter, r *http.Request) {
 
 	// Проверяем пароль
 	//	if !checkPassword(storedPassword, creds.Password) {
-	//		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+	//		http.Error(w, "Invalid name or password", http.StatusUnauthorized)
 	//		return
 	//	}
 
-	token, err := generateJWT(user.Email)
+	token, err := generateJWT(user.Name)
 	if err != nil {
 		http.Error(w, "Failed to generate token", http.StatusInternalServerError)
 		return
@@ -191,7 +191,7 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Получаем email из токена
-	email, ok := (*claims)["email"].(string)
+	name, ok := (*claims)["name"].(string)
 	if !ok {
 		http.Error(w, "Invalid token payload", http.StatusUnauthorized)
 		return
@@ -199,7 +199,7 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 
 	// Ищем пользователя в памяти
 	mu.Lock()
-	user, exists := users[email]
+	user, exists := users[name]
 	mu.Unlock()
 
 	if !exists {
@@ -211,9 +211,9 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 	response := map[string]interface{}{
 		"id":               user.ID,
 		"username":         user.Username,
-		"name":             user.Username, // Временно используем `username` как `name`
-		"preferences":      "{}",          // Заглушка для предпочтений
-		"completed_events": []string{},    // Заглушка для завершенных событий
+		"name":             user.Name,
+		"preferences":      "{}",       // Заглушка для предпочтений
+		"completed_events": []string{}, // Заглушка для завершенных событий
 	}
 
 	// Отправляем JSON-ответ
@@ -251,7 +251,7 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Получаем email из токена
-	email, ok := (*claims)["email"].(string)
+	name, ok := (*claims)["name"].(string)
 	if !ok {
 		http.Error(w, "Invalid token payload", http.StatusUnauthorized)
 		return
@@ -259,7 +259,7 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 
 	// Ищем пользователя в памяти
 	mu.Lock()
-	user, exists := users[email]
+	user, exists := users[name]
 	mu.Unlock()
 
 	if !exists {
@@ -289,7 +289,7 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 
 	// Сохраняем обновленного пользователя
 	mu.Lock()
-	users[email] = user
+	users[name] = user
 	mu.Unlock()
 
 	// Возвращаем обновленные данные

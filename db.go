@@ -13,7 +13,7 @@ var db *pgxpool.Pool
 
 // Подключение к PostgreSQL
 func ConnectDB() {
-	dsn := "postgres://opsoop:dimas5727F@localhost:5432/secret_santa"
+	dsn := "postgres://opsoop:passwordPSWD@localhost:5432/santa_project"
 	var err error
 
 	db, err = pgxpool.New(context.Background(), dsn)
