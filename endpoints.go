@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -122,7 +123,8 @@ func loginUser(w http.ResponseWriter, r *http.Request) {
 
 	// Ищем пользователя в базе
 		var storedPassword string
-		err = db.QueryRow(context.Background(), "SELECT password FROM users WHERE name=$1", creds.Name).Scan(&storedPassword)
+		err := db.QueryRow(context.Background(), "SELECT password FROM users WHERE name=$1", creds.Name).Scan(&storedPassword)
+		
 		if err != nil {
 			http.Error(w, "Invalid name or password", http.StatusUnauthorized)
 			return
@@ -199,6 +201,7 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	row := db.QueryRow(context.Background(),"SELECT id, username, name, preferences, completed_events FROM users WHERE name = :name", sql.Named("name", name))
 	// Ищем пользователя в памяти
 	// mu.Lock()
 	// user, exists := users[name]
@@ -208,14 +211,21 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 	// 	http.Error(w, "User not found", http.StatusNotFound)
 	// 	return
 	// }
+p := User{}
+	err = row.Scan(&p.ID, &p.Username, &p.Name, &p.Preferences, &p.CompletedEvents)
+	
+	if err != nil {
 
+		return 
+
+	}
 	// Формируем ответ
 	response := map[string]interface{}{
-		"id":               user.ID,
-		"username":         user.Username,
-		"name":             user.Name,
-		"preferences":      "{}",       // Заглушка для предпочтений
-		"completed_events": []string{}, // Заглушка для завершенных событий
+		"id":               p.ID,
+		"username":         p.Username,
+		"name":             p.Name,
+		"preferences":      p.Preferences,       
+		"completed_events": p.CompletedEvents, 
 	}
 
 	// Отправляем JSON-ответ
@@ -252,7 +262,7 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Получаем email из токена
+	// // Получаем Name из токена
 	name, ok := (*claims)["name"].(string)
 	if !ok {
 		http.Error(w, "Invalid token payload", http.StatusUnauthorized)
@@ -260,15 +270,25 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Ищем пользователя в памяти
-	mu.Lock()
-	user, exists := users[name]
-	mu.Unlock()
+	// mu.Lock()
+	// user, exists := users[name]
+	// mu.Unlock()
 
-	if !exists {
-		http.Error(w, "User not found", http.StatusNotFound)
-		return
+	// if !exists {
+	// 	http.Error(w, "User not found", http.StatusNotFound)
+	// 	return
+	// }
+
+	row := db.QueryRow(context.Background(),"SELECT name, preferences FROM users WHERE name = :name", sql.Named("name", name))
+
+	p := User{}
+	err = row.Scan(&p.Name, &p.Preferences)
+	
+	if err != nil {
+
+		return 
+
 	}
-
 	// Декодируем JSON-запрос
 	var updateData struct {
 		Name        string `json:"name"`
@@ -282,26 +302,26 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 
 	// Обновляем данные пользователя (только если поля переданы)
 	if updateData.Name != "" {
-		user.Username = updateData.Name // Временно используем `Username` как `Name`
+		p.Name = updateData.Name 
 	}
 	if updateData.Preferences != "" {
 		// Здесь можно валидировать JSON `Preferences`
-		user.Preferences = updateData.Preferences
+		p.Preferences = updateData.Preferences
 	}
 
-	// Сохраняем обновленного пользователя
-	mu.Lock()
-	users[name] = user
-	mu.Unlock()
+	//  Сохраняем обновленного пользователя
+	// mu.Lock()
+	// users[name] = user
+	// mu.Unlock()
+
+row, err = db.Exec(context.Background(),"UPDATE users SET name = :name, preferences = :preferences", sql.Named("name", p.Name), sql.Named("preferences", p.Preferences) ).Scan( &p.Name, &p.Preferences)
+
 
 	// Возвращаем обновленные данные
 	response := map[string]interface{}{
 		"message":          "User updated successfully",
-		"id":               user.ID,
-		"username":         user.Username,
-		"name":             user.Username, // TODO
-		"preferences":      user.Preferences,
-		"completed_events": user.CompletedEvents,
+		"name":             p.Name,
+		"preferences":      p.Preferences,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
