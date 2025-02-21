@@ -2,9 +2,12 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -53,8 +56,14 @@ func registerUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if user.Username == "" || user.Name == "" || user.Password == "" {
+	if user.Username == "" || user.Name == "" || user.Preferences == "" || user.Password == "" {
 		http.Error(w, "All fields are required", http.StatusBadRequest)
+		return
+	}
+
+	// Проверяем, что db инициализирован
+	if db == nil {
+		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
 
@@ -76,18 +85,20 @@ func registerUser(w http.ResponseWriter, r *http.Request) {
 
 	// Сохраняем пользователя в базу
 
-	_, err = db.Exec(context.Background(), "INSERT INTO users (username, email, password) VALUES ($1, $2, $3)", user.Username, user.Name, hashedPassword)
+	_, err = db.Exec(context.Background(), "INSERT INTO users (username, name, preferences, password) VALUES ($1, $2, $3, $4)", user.Username, user.Name, user.Preferences, hashedPassword)
 	if err != nil {
-		http.Error(w, "User already exists", http.StatusConflict)
-		return
+		if strings.Contains(err.Error(), "unique constraint") {
+			http.Error(w, "User already exists", http.StatusConflict)
+		} else {
+			http.Error(w, "Database error", http.StatusInternalServerError)
+		}
 	}
-
 	// w.WriteHeader(http.StatusCreated)
 	// json.NewEncoder(w).Encode(map[string]string{
 	// 	"message": "User registered successfully",
 	// })
 
-		// Возвращаем успешный ответ
+	// Возвращаем успешный ответ
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
 	json.NewEncoder(w).Encode(map[string]string{
@@ -121,18 +132,19 @@ func loginUser(w http.ResponseWriter, r *http.Request) {
 	// }
 
 	// Ищем пользователя в базе
-		var storedPassword string
-		err = db.QueryRow(context.Background(), "SELECT password FROM users WHERE name=$1", creds.Name).Scan(&storedPassword)
-		if err != nil {
-			http.Error(w, "Invalid name or password", http.StatusUnauthorized)
-			return
-		}
+	var storedPassword string
+	err := db.QueryRow(context.Background(), "SELECT password FROM users WHERE name=$1", creds.Name).Scan(&storedPassword)
+
+	if err != nil {
+		http.Error(w, "Invalid name or password", http.StatusUnauthorized)
+		return
+	}
 
 	// Проверяем пароль
-		if !checkPassword(storedPassword, creds.Password) {
-			http.Error(w, "Invalid name or password", http.StatusUnauthorized)
-			return
-		}
+	if !checkPassword(storedPassword, creds.Password) {
+		http.Error(w, "Invalid name or password", http.StatusUnauthorized)
+		return
+	}
 
 	token, err := generateJWT(creds.Name)
 	if err != nil {
@@ -199,6 +211,7 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	row := db.QueryRow(context.Background(), "SELECT id, username, name, preferences, completed_events FROM users WHERE name = :name", sql.Named("name", name))
 	// Ищем пользователя в памяти
 	// mu.Lock()
 	// user, exists := users[name]
@@ -208,14 +221,21 @@ func getUser(w http.ResponseWriter, r *http.Request) {
 	// 	http.Error(w, "User not found", http.StatusNotFound)
 	// 	return
 	// }
+	p := User{}
+	err = row.Scan(&p.ID, &p.Username, &p.Name, &p.Preferences, &p.CompletedEvents)
 
+	if err != nil {
+
+		return
+
+	}
 	// Формируем ответ
 	response := map[string]interface{}{
-		"id":               user.ID,
-		"username":         user.Username,
-		"name":             user.Name,
-		"preferences":      "{}",       // Заглушка для предпочтений
-		"completed_events": []string{}, // Заглушка для завершенных событий
+		"id":               p.ID,
+		"username":         p.Username,
+		"name":             p.Name,
+		"preferences":      p.Preferences,
+		"completed_events": p.CompletedEvents,
 	}
 
 	// Отправляем JSON-ответ
@@ -252,7 +272,7 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Получаем email из токена
+	// // Получаем Name из токена
 	name, ok := (*claims)["name"].(string)
 	if !ok {
 		http.Error(w, "Invalid token payload", http.StatusUnauthorized)
@@ -260,15 +280,25 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Ищем пользователя в памяти
-	mu.Lock()
-	user, exists := users[name]
-	mu.Unlock()
+	// mu.Lock()
+	// user, exists := users[name]
+	// mu.Unlock()
 
-	if !exists {
-		http.Error(w, "User not found", http.StatusNotFound)
+	// if !exists {
+	// 	http.Error(w, "User not found", http.StatusNotFound)
+	// 	return
+	// }
+
+	row := db.QueryRow(context.Background(), "SELECT name, preferences FROM users WHERE name = :name", sql.Named("name", name))
+
+	p := User{}
+	err = row.Scan(&p.Name, &p.Preferences)
+
+	if err != nil {
+
 		return
-	}
 
+	}
 	// Декодируем JSON-запрос
 	var updateData struct {
 		Name        string `json:"name"`
@@ -282,26 +312,30 @@ func updateUser(w http.ResponseWriter, r *http.Request) {
 
 	// Обновляем данные пользователя (только если поля переданы)
 	if updateData.Name != "" {
-		user.Username = updateData.Name // Временно используем `Username` как `Name`
+		p.Name = updateData.Name
 	}
 	if updateData.Preferences != "" {
 		// Здесь можно валидировать JSON `Preferences`
-		user.Preferences = updateData.Preferences
+		p.Preferences = updateData.Preferences
 	}
 
-	// Сохраняем обновленного пользователя
-	mu.Lock()
-	users[name] = user
-	mu.Unlock()
+	//  Сохраняем обновленного пользователя
+	// mu.Lock()
+	// users[name] = user
+	// mu.Unlock()
+
+	_, err = db.Exec(context.Background(), "UPDATE users SET name = :name, preferences = :preferences", sql.Named("name", p.Name), sql.Named("preferences", p.Preferences))
+
+	if err != nil {
+		log.Printf("Ошибка при обновлении пользователя: %v", err)
+		// Обработка ошибки
+	}
 
 	// Возвращаем обновленные данные
 	response := map[string]interface{}{
-		"message":          "User updated successfully",
-		"id":               user.ID,
-		"username":         user.Username,
-		"name":             user.Username, // TODO
-		"preferences":      user.Preferences,
-		"completed_events": user.CompletedEvents,
+		"message":     "User updated successfully",
+		"name":        p.Name,
+		"preferences": p.Preferences,
 	}
 
 	w.Header().Set("Content-Type", "application/json")

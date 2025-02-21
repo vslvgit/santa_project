@@ -9,6 +9,9 @@ import (
 
 func main() {
 
+	ConnectDB()
+	defer db.Close()
+
 	r := chi.NewRouter()
 
 	// Маршруты
