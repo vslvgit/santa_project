@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"strings"
 	"time"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -61,20 +60,10 @@ func registerUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Проверяем, что db инициализирован
 	if db == nil {
 		http.Error(w, "Database connection error", http.StatusInternalServerError)
 		return
 	}
-
-	// mu.Lock()
-	// defer mu.Unlock()
-	// if _, exists := users[user.Name]; exists {
-	// 	http.Error(w, "User already exists", http.StatusConflict)
-	// 	return
-	// }
-
-	// users[user.Name] = user
 
 	// Хешируем пароль
 	hashedPassword, err := hashPassword(user.Password)
@@ -83,20 +72,26 @@ func registerUser(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Сохраняем пользователя в базу
+	// Проверяем, существует ли пользователь
+	var existingUser int
+	err = db.QueryRow(context.Background(), "SELECT COUNT(*) FROM users WHERE username=$1 OR name=$2", user.Username, user.Name).Scan(&existingUser)
+	if err != nil {
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
+	}
 
+	if existingUser > 0 {
+		http.Error(w, "User already exists", http.StatusConflict)
+		return
+	}
+
+	// Сохраняем пользователя в базу данных
 	_, err = db.Exec(context.Background(), "INSERT INTO users (username, name, preferences, password) VALUES ($1, $2, $3, $4)", user.Username, user.Name, user.Preferences, hashedPassword)
 	if err != nil {
-		if strings.Contains(err.Error(), "unique constraint") {
-			http.Error(w, "User already exists", http.StatusConflict)
-		} else {
-			http.Error(w, "Database error", http.StatusInternalServerError)
-		}
+		log.Printf("Error during registration: %v\n", err) // Логирование ошибки
+		http.Error(w, "Database error", http.StatusInternalServerError)
+		return
 	}
-	// w.WriteHeader(http.StatusCreated)
-	// json.NewEncoder(w).Encode(map[string]string{
-	// 	"message": "User registered successfully",
-	// })
 
 	// Возвращаем успешный ответ
 	w.Header().Set("Content-Type", "application/json")
@@ -105,7 +100,6 @@ func registerUser(w http.ResponseWriter, r *http.Request) {
 		"message":  "User registered successfully",
 		"username": user.Username,
 	})
-
 }
 
 // Обработчик входа (логина)
